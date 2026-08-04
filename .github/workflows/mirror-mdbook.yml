@@ -6,7 +6,7 @@ name: mdbook
 
 on:
   schedule:
-    - cron: '47 */6 * * *'
+    - cron: '6 1-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]

@@ -36,17 +36,6 @@ discovered on `PATH`, so no plugin needs to be compiled into mdBook itself.
   change, `mdbook clean` removes the output, and `mdbook completions <shell>`
   writes shell completions to stdout.
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/rust-lang/mdbook
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/rust-lang/mdbook:0.5.4
-```
-
 ## Links
 
 - [mdBook on GitHub](https://github.com/rust-lang/mdBook)

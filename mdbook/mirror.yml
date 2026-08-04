@@ -1,0 +1,204 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's bare Linux keys honest, and restating it to tweak one runner
+# would drop them all without reddening anything.
+extends: ../mirror-base.yml
+
+name: mdbook
+
+# Logical index package `rust-lang/mdbook` at the physical path
+# `ghcr.io/ocx-contrib/rust-lang/mdbook` — slash segments, never
+# hyphen-flattened. Two segments always. `rust-lang` is the project's own
+# GitHub org and the brand the tool ships under, and the package segment is
+# the name the project publishes under: the crate, the binary and the
+# subcommand are all lowercase `mdbook`, even though the REPOSITORY is spelled
+# `mdBook`. Index coordinates are lowercase always, so the capital B lives only
+# in `source.repo` below. The first path segment of `target.repository` must be
+# this repo's own GitHub owner: GITHUB_TOKEN only authorises packages owned by
+# the repo the workflow runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/rust-lang/mdbook
+
+source:
+  type: github_release
+  owner: rust-lang
+  # Capital B — the canonical spelling GitHub returns:
+  #   $ gh api repos/rust-lang/mdBook --jq .full_name   → rust-lang/mdBook
+  # The API also resolves the all-lowercase form by redirect (it answers
+  # `rust-lang/mdBook` for `repos/rust-lang/mdbook` too), but the canonical
+  # casing is what is recorded here so nothing depends on that redirect.
+  repo: mdBook
+  # Tags carry a `v` prefix (`v0.5.4`) and so do the ASSET FILENAMES
+  # (`mdbook-v0.5.4-…`). The capture group strips the tag's `v` so the
+  # PUBLISHED version is bare semver (`0.5.4`), while every asset regex below
+  # still has to tolerate the `v` that remains in the filename. Prereleases
+  # (`v0.5.0-beta.2`, `v0.5.0-alpha.1`) cannot match this anchored pattern, and
+  # `skip_prereleases: true` in the base excludes them a second time.
+  tag_pattern: "^v(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# mdBook is Rust. Upstream ships BOTH `-gnu` and `-musl` for x86_64 but ONLY
+# `-musl` for aarch64. The triple is not the verdict; the ELF header is.
+# Measured on v0.5.4 (latest) and v0.5.2 (the floor), on both arches:
+#
+#   $ file mdbook-v0.5.4-x86_64-unknown-linux-musl/mdbook
+#   ELF 64-bit LSB pie executable, x86-64, static-pie linked, not stripped
+#   $ file mdbook-v0.5.2-x86_64-unknown-linux-musl/mdbook
+#   ELF 64-bit LSB pie executable, x86-64, static-pie linked, not stripped
+#   $ file mdbook-v0.5.4-aarch64-unknown-linux-musl/mdbook
+#   ELF 64-bit LSB executable, ARM aarch64, statically linked, not stripped
+#   $ file mdbook-v0.5.2-aarch64-unknown-linux-musl/mdbook
+#   ELF 64-bit LSB executable, ARM aarch64, statically linked, not stripped
+#   $ readelf -l <bin> | grep -c INTERP   → 0        (all four)
+#   $ readelf -d <bin> | grep NEEDED      → (none)   (all four)
+#
+# No PT_INTERP and no DT_NEEDED: musl is linked IN, not linked AGAINST. The
+# artifact requires nothing of the host, so both Linux keys are BARE — no
+# `+libc.*` suffix. Tagging them `+libc.musl` would be a false requirement that
+# hid the package from every glibc host it in fact runs on.
+#
+# The `file` verdict was cross-checked against a UPX stub, which defeats this
+# gate by leaving no PT_INTERP and no section headers on a dynamic binary:
+#
+#   $ strings -a <bin> | grep -c '^UPX'           → 0   (all four)
+#   $ readelf -h <bin> | grep 'Start of section headers'
+#     → 12823176 / 13002296 / 12077216 / 12171968 (bytes) — present, non-zero
+#
+# Not packed. The static verdict stands on its own evidence.
+#
+# The x86_64 gnu assets were measured too, and are the contrast that makes the
+# choice deliberate rather than incidental:
+#
+#   $ file mdbook-v0.5.4-x86_64-unknown-linux-gnu/mdbook
+#   … dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for
+#   GNU/Linux 3.2.0, not stripped
+#   $ readelf -d … | grep NEEDED  → libgcc_s.so.1, libm.so.6, libc.so.6
+#   $ readelf -V … | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1  → GLIBC_2.34
+#
+# That build genuinely requires glibc ≥ 2.34 and would need `+libc.glibc`. It
+# is NOT carried. Two keys is the fallback, not the goal: the static musl build
+# already runs under both userlands, and the usual reason to ship a second gnu
+# key — musl's resolver ignores nsswitch.conf and loads no NSS modules — does
+# not apply to mdBook. It reads and writes local files and, in `serve` mode,
+# BINDS a local socket; it never resolves a hostname. Carrying musl on both
+# arches also keeps them symmetric, which aarch64's musl-only upstream forces
+# regardless. The alpine container leg in ../mirror-base.yml is what turns the
+# universality claim into evidence.
+#
+# ─── Scope (verified on ALL THREE in-range releases: v0.5.2, v0.5.3, v0.5.4) ─
+#
+# Every one of those releases ships EXACTLY SIX assets, and the six names are
+# identical but for the version segment. There are no `.sha256`/`.sig`/`.asc`
+# sidecars to exclude, and no format sibling was added or dropped anywhere in
+# the range — `.tar.gz` spans all three releases on every unix platform and
+# `.zip` spans all three on Windows.
+#
+# Each release's asset names carry THEIR OWN version (v0.5.4's six assets are
+# all named `mdbook-v0.5.4-…`), so this is not the failure mode where an
+# upstream re-uploads the previous version's binaries under a new tag and
+# greens everything. Checked per tag with
+# `gh api repos/rust-lang/mdBook/releases/tags/<tag> --jq '.assets[].name'`.
+#
+# Upstream publishes nothing this mirror leaves behind on the LINUX side other
+# than `x86_64-unknown-linux-gnu.tar.gz`, excluded on the deliberate grounds
+# above. Not shipped by upstream at all, and therefore not declarable:
+#   aarch64-unknown-linux-gnu   — absent at every release in and around the
+#                                 range; arm64 is musl-only upstream. This is
+#                                 why there is no `linux/arm64+libc.glibc` key.
+#   aarch64-pc-windows-msvc     — absent at every release; Windows is x86_64
+#                                 only, so there is no windows/arm64 platform
+#                                 in this mirror and none staged for later.
+#
+# The anchored ^…$ regexes are what keep the gnu sibling out: every Linux
+# pattern ends `-musl\.tar\.gz$`, which `…-x86_64-unknown-linux-gnu.tar.gz`
+# cannot match. Resolution verified BOTH ways on every in-range release: each
+# pattern matches EXACTLY one asset, and no other asset in any release matches
+# any of them. A pattern matching zero is silently skipped, not an error — it
+# would yield a green run with a missing platform.
+#
+# ⚠ STAGED ROLLOUT — darwin/windows keys are commented here AND in
+# ../mirror-base.yml's `platforms:` block; both halves get uncommented together,
+# one pass at a time, with `generate ci` re-run each pass.
+assets:
+  linux/amd64:
+    - "^mdbook-v.*-x86_64-unknown-linux-musl\\.tar\\.gz$"
+  linux/arm64:
+    - "^mdbook-v.*-aarch64-unknown-linux-musl\\.tar\\.gz$"
+  # darwin/amd64:
+  #   - "^mdbook-v.*-x86_64-apple-darwin\\.tar\\.gz$"
+  # darwin/arm64:
+  #   - "^mdbook-v.*-aarch64-apple-darwin\\.tar\\.gz$"
+  # windows/amd64:
+  #   - "^mdbook-v.*-x86_64-pc-windows-msvc\\.zip$"
+
+# Every archive is FLAT: one file at the archive root and nothing else. No
+# wrapper directory, no `bin/`, no bundled LICENSE or README. Verified with
+# `tar tvf` / `unzip -l` on v0.5.2 and v0.5.4, linux + darwin + windows:
+#
+#   $ tar tvzf mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz
+#   -rwxr-xr-x runner/runner 12665904 2026-07-06 17:30 mdbook
+#   $ tar tvzf mdbook-v0.5.2-aarch64-apple-darwin.tar.gz
+#   -rwxr-xr-x runner/staff  10939824 2025-12-11 22:19 mdbook
+#   $ unzip -l mdbook-v0.5.4-x86_64-pc-windows-msvc.zip
+#   11880960  07-06-2026 15:31   mdbook.exe
+#
+# `strip_components: 0` is therefore FORCED, not chosen, and the number matters
+# in the destructive direction: on a FLAT archive `strip_components: 1` deletes
+# the only entry and hoists its (non-existent) children in its place, shipping
+# a bundle with no binary at all. The Windows zip is flat too — it holds
+# `mdbook.exe` at the root, already carrying the `.exe` suffix — so one
+# top-level value serves every platform and no per-platform override is needed.
+# One metadata.json (PATH = ${installPath}) likewise serves all five.
+asset_type:
+  type: archive
+  strip_components: 0
+
+# `off`, overriding the base's `auto` — FORCED by the flat layout above, not
+# chosen. The scan only inspects an interface-visible `${installPath}/<dir>`
+# PATH entry, and a flat archive leaves no subdirectory to point one at, so
+# both `auto` and `verify` fail spec load at exit 65:
+#
+#   bin_scan is enabled but metadata.json declares no interface-visible
+#   ${installPath}/<dir> PATH entry — the verification would inspect no file and
+#   pass green whatever the archive contains.
+#
+# The `binaries` list in metadata.json is therefore hand-maintained, exactly as
+# that error directs. It is as short and stable as a claim gets: `mdbook`
+# (`mdbook.exe` on Windows) is the ONLY entry in the archive, at mode 0755
+# upstream. Quoted so no YAML 1.1 reader folds the bare word into boolean
+# `false`.
+bin_scan: "off"
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  min: "0.5.2"
+  new_per_run: 5
+  poll_interval: "47 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: mdbook/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/rust-lang/mdBook/license --jq '.license.spdx_id'
+  #   MPL-2.0
+  # Weak copyleft: binary redistribution is granted, and the per-version
+  # Source Code Form pointer MPL-2.0 §3.2(a) requires is in ../NOTICE.md.
+  org.opencontainers.image.licenses: "MPL-2.0"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: rust-lang/mdbook
+  fork: ocx-contrib/index

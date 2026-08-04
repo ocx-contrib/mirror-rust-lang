@@ -131,8 +131,8 @@ assets:
     - "^mdbook-v.*-x86_64-apple-darwin\\.tar\\.gz$"
   darwin/arm64:
     - "^mdbook-v.*-aarch64-apple-darwin\\.tar\\.gz$"
-  # windows/amd64:
-  #   - "^mdbook-v.*-x86_64-pc-windows-msvc\\.zip$"
+  windows/amd64:
+    - "^mdbook-v.*-x86_64-pc-windows-msvc\\.zip$"
 
 # Every archive is FLAT: one file at the archive root and nothing else. No
 # wrapper directory, no `bin/`, no bundled LICENSE or README. Verified with
